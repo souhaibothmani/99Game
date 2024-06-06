@@ -39,3 +39,9 @@ void enableBTNinterrupt()
     PCMSK1 |= _BV(PC1) | _BV(PC2) | _BV(PC3);
     
 }
+
+void initButton()
+{
+    DDRC &= ~_BV(PC1) | ~_BV(PC2) | ~_BV(PC3);
+    PORTC |= _BV(PC1) | _BV(PC2) | _BV(PC3);
+}
