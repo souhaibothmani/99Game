@@ -1,231 +1,405 @@
-#define __DELAY_BACKWARD_COMPATIBLE__
 #include <avr/interrupt.h>
-#include <avr/io.h>
 #include <util/delay.h>
-#include <display.h>
+#include <avr/io.h>
 #include <usart.h>
-#include <time.h>
-#include <led.h>
-#include <string.h>
-#include <ctype.h>
+#include <display.h>
+#include <stdlib.h> // For rand(), malloc, realloc, free
 #include <button.h>
+#include <led.h>
+#include <potentiometer.h>
 #include <buzzer.h>
+#include <timer.h>
 
-// #define DURATION 150
+//******************************************************************************************************************************
+//                                                     DECLARATIONS
+//******************************************************************************************************************************
 
-int currentSpeed = 100; // speed in m/s (meters per second)
-float gravity = 1.622;  // acceleration in m/s²
-int distance = 9999;    // distance to the lunar surface in meters - m
-int fuelReserve = 1500; // litre
-int arrlen = 0;
 
+#define WIN_SCORE 99
+#define INITIAL_TURNS_CAPACITY 10
 #define MULTIPLE 250
-#define DURATION 500
 
-typedef struct
-{
-    int length;
-    int *burst;
-    int *distance;
-    float gravity;
-    int *fuelReserve;
-    int *current_speed;
+typedef struct {
+    char player; // 'P' or 'C'
+    int rolls[10]; // Store up to 10 rolls per turn
+    int numRolls;
+    int turnScore;
+    int playerScore;
+    int computerScore;
+    char decision; // 'A' for add, 'S' for subtract
+} GameTurn;
 
-} LUNDER_LANDER;
+GameTurn* gameTurns = NULL;
+int currentTurnIndex = 0;
+int turnsCapacity = 0;
 
-LUNDER_LANDER *lunar_lander;
+int playerScore = 0; // player score
+int computerScore = 0; // computer score
+int currentTurnScore = 0; // current turn score
+char currentPlayer = 'P'; // 'P' for Player, 'C' for Computer
+int roll = 0;
+int count = 0;
+int seconds = 0;
+int buttonIsPressed = 0;
 
-int counter;
-int seconds;
-int minutes;
-int loop;
-int burst;
-int burst_duration;
-
-//FREQUENCIES OF THE NOTES
-#define C5 523.250
-#define D5 587.330
-#define E5 659.250
-#define F5 698.460
-#define G5 783.990
-#define A5 880.00
-#define B5 987.770
-#define C6 1046.500
+//******************************************************************************************************************************
+//|                                                  METHODS                                                             
+//******************************************************************************************************************************
 
 
-void printLunderLanderData(LUNDER_LANDER *lunar_lander)
-{
+//******************************************************************************************************************************
+//                                                DISPLAY METHODS
 
-    printf("Current Speed\n");
-    for (int i = 0; i < lunar_lander->length; i++)
-    {
-        printf("%d ", lunar_lander->current_speed[i]);
-    }
-    printf("\nDistance\n");
-    for (int i = 0; i < lunar_lander->length; i++)
-    {
-        printf("%d ", lunar_lander->distance[i]);
-    }
-    printf("\nFuel Reserve\n");
-    for (int i = 0; i < lunar_lander->length; i++)
-    {
-        printf("%d ", lunar_lander->fuelReserve[i]);
-    }
-    printf("\n");
-}
-
-uint8_t crashed()
-{
-    printf("Ow, You have crashed !!\n");
-
-    uint32_t frequencies[] = {C5, D5, D5, C6};
-    for (int i = 0; i < 4; i++)
-    {
-        enableBuzzer();
-        playTone(frequencies[i], DURATION);
-    }
-    printLunderLanderData(lunar_lander);
-  loop=0;
-    return loop;
-}
-
-uint8_t safe_landing()
-{
-    printf("Congratulations, You have safe landed !!\n");
-    uint32_t frequencies[] = {C5, D5, E5, F5, G5, A5, B5, C6};
-    for (int i = 0; i < 8; i++)
-    {
-        enableBuzzer();
-        playTone(frequencies[i], DURATION);
-    }
-    printLunderLanderData(lunar_lander);
-    loop=0;
-    return loop;
-}
-
-void recalculate_newSituation(int *currentSpeed, float *gravity, int *burst, int *distance, int *fuelReserve, LUNDER_LANDER *lunar_lander)
-{
-    *burst = burst_duration;
-    if (*burst > 50)
-    {
-        *burst = 50;
-    }
-    *currentSpeed += (*gravity - *burst) / 5;
-    *distance -= *currentSpeed;
-    *fuelReserve -= *burst;
-
-    lunar_lander->current_speed[lunar_lander->length] = *currentSpeed;
-    lunar_lander->distance[lunar_lander->length] = *distance;
-    lunar_lander->fuelReserve[lunar_lander->length] = *fuelReserve;
-}
-
-void tick()
-{
-    if (seconds == 60)
-    {
-        seconds = 0;
-        minutes += 1;
-    }
-}
-
-void showParameters(int *currentSpeed, int *current_fuelReserve, int *current_distance)
-{
-    uint8_t fuel_tank = (*current_fuelReserve / 375);
-    writeNumber(*current_distance);
-    enableAllLeds();
-    if (fuel_tank == 4)
-    {
-        lightUpAllLeds();
-    }
-    else
-    {
-        lightDownAllLeds();
-        for (uint8_t i = 0; i < fuel_tank; i++)
-        {
-            lightUpOneLed(i);
+void displayGameStatus() {
+    for (int i = 0; i < 10; i++) {
+        if (currentPlayer == 'P') { // display player's total score
+            writeCharToSegment(1, 'P');
+            writeNumberToSegment(2, playerScore / 10);
+            writeNumberToSegment(3, playerScore % 10);
+        } else { // display computer's total score
+            writeCharToSegment(1, 'C');
+            writeNumberToSegment(2, computerScore / 10);
+            writeNumberToSegment(3, computerScore % 10);
         }
     }
-    if ((*current_distance <= 3) && *currentSpeed <= 5)
-    {
-        safe_landing();
-    }
-    else if ((*current_distance <= 3 && *currentSpeed > 5) || (*current_distance > 3 && *current_fuelReserve <= 0))
-    {
-        crashed();
+}
+
+void displayTurnStatus() {
+    for (int i = 0; i < 10; i++) {
+        if (currentPlayer == 'P') { // display player's turn score
+            writeCharToSegment(1, 'P');
+            writeNumberToSegment(2, currentTurnScore / 10);
+            writeNumberToSegment(3, currentTurnScore % 10);
+        } else { // display computer's turn score
+            writeCharToSegment(1, 'C');
+            writeNumberToSegment(2, currentTurnScore / 10);
+            writeNumberToSegment(3, currentTurnScore % 10);
+        }
     }
 }
 
-void initTimer() {
+void displayRoll() {
+    if (currentPlayer == 'P') { // display player's roll result
+        for (int i = 0; i < 500; i++) {
+            writeNumberToSegment(0, roll);
+            writeCharToSegment(1, 'P');
+            writeNumberToSegment(2, currentTurnScore / 10);
+            writeNumberToSegment(3, currentTurnScore % 10);
+        }
+    } else { // display computer's roll result
+        for (int i = 0; i < 500; i++) {
+            writeNumberToSegment(0, roll);
+            writeCharToSegment(1, 'C');
+            writeNumberToSegment(2, currentTurnScore / 10);
+            writeNumberToSegment(3, currentTurnScore % 10);
+        }
+    }
+}
+
+void displayGameLog() {
+    for (int i = 0; i < currentTurnIndex; i++) {
+        printf("Turn %d: Player: %c, Rolls: ", i + 1, gameTurns[i].player);
+        for (int j = 0; j < gameTurns[i].numRolls; j++) {
+            printf("%d ", gameTurns[i].rolls[j]);
+        }
+        printf(", Turn Score: %d, Player Score: %d, Computer Score: %d, Decision: %c\n", 
+            gameTurns[i].turnScore, gameTurns[i].playerScore, gameTurns[i].computerScore, gameTurns[i].decision);
+    }
+}
+
+//******************************************************************************************************************************
+
+
+
+
+
+//******************************************************************************************************************************
+//                                              GAME LOOP METHODS
+void handlePlayerTurn() { //handle the player turn
+    while (currentPlayer == 'P') { //as long as the player playing is P(so us)
+
+        //we start by displaying the turn status
+        displayTurnStatus(); 
+
+        if (buttonPushed(1)) { // if player presses button 1 
+            roll = (rand() % 6) + 1; // we roll by using a random number
+            for (int i = 0; i < 10; i++) {
+                displayRoll(); // and then we display the roll result
+            }
+
+            if (roll == 1) { // if roll is 1, reset turn score and switch turn
+                currentTurnScore = 0;
+                switchTurnAfter1();
+            } else { 
+                currentTurnScore += roll; // we add the roll value to the turn score
+            }
+        }
+
+        if (buttonPushed(2)) { // if player pressed button 2
+            _delay_ms(100); //debounce
+            while (1) { //as long as the player didn't press any other button
+
+                displayTurnStatus(); //we display the turn value
+
+                if (buttonPushed(2)) { //if button 2 is pressed
+                    playerScore += currentTurnScore; // add turn score to total score
+                    logGameTurn('A'); //save the turn as A(add)
+
+                    if (playerScore >= WIN_SCORE) { //if player score is higher or equal to the turn score
+
+                        writeStringAndWait("PWIN", 1000); // Display "PWIN" for 1 second
+                        displayGameLog(); //display all the turns on the serial monitor
+                        enableBuzzer(); //enable the buzzer 
+                        playTone(1046.502, 1); // , play sound for winning for 1 second
+                        free(gameTurns); // and free the allocated memory
+
+                        while (1); // stop the game
+                    }
+                    switchTurn();//switch the Turn
+                    break;
+                }
+                if (buttonPushed(3)) { //if player pressed button 3
+                    decrementOpponentScore(&computerScore);// subtract from opponent's score
+                    logGameTurn('S'); //save turn as S(substract)
+                    switchTurn(); //switch turn
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void handleComputerTurn() { //handle computer turn
+    while (currentPlayer == 'C') { //as long as it's the computer turn
+
+        for (int i = 0; i < 1000; i++) {
+            displayTurnStatus(); // display current turn status
+        }
+
+        roll = (rand() % 6) + 1; // generate random number as roll
+        for (int i = 0; i < 10; i++) {
+            displayRoll(); // display roll result
+        }
+
+        if (roll == 1) {
+            currentTurnScore = 0;
+            switchTurnAfter1();
+        } else {
+            currentTurnScore += roll;
+        }
+
+        // intelligent decision-making
+        if (currentTurnScore < 10) {
+            // roll again if turn score is less than 10
+            continue;
+        } else if (currentTurnScore > 15) {
+            // end turn if turn score exceeds 15
+            break;
+        } else if (currentTurnScore >= 10 && currentTurnScore <= 15) {
+            // 50% chance to roll again if turn score is between 10 and 15
+            if ((rand() % 100) < 50) {
+                continue;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (currentPlayer == 'C') {
+        computerScore += currentTurnScore;
+        if (playerScore > 80 && (rand() % 100) < 80) { // 80% chance to subtract from player's score
+            decrementOpponentScore(&playerScore);//decrement opponent's score
+        }
+        logGameTurn('A');
+        if (computerScore >= WIN_SCORE) {
+            writeStringAndWait("CWIN", 1000); // Display "CWIN" for 1 second
+            displayGameLog(); 
+            enableBuzzer();
+            playTone(1046.502, 1); // Play sound for winning
+            free(gameTurns); // Free the allocated memory
+            while (1); // Stop the game
+        }
+        switchTurn();
+    }
+}
+
+void switchTurn() {
+    currentTurnScore = 0; //set the current turnscore to 0
+    roll = 0; //set the roll to 0
+    for (int i = 0; i < 500; i++) {
+        displayGameStatus(); // display updated game status
+    }
+    currentPlayer = (currentPlayer == 'P') ? 'C' : 'P'; //change the currentPlayer
+    for (int i = 0; i < 500; i++) {
+        displayGameStatus(); // display updated game status of the other player before starting the turn
+    }
+}
+
+void switchTurnAfter1() { //same as switchTurn but with buzzer
+    currentTurnScore = 0;
+    roll = 0;
+    for (int i = 0; i < 500; i++) {
+        enableBuzzer();
+        playTone(783.990, 1);
+        displayGameStatus(); // display updated game status
+    }
+    currentPlayer = (currentPlayer == 'P') ? 'C' : 'P';
+    for (int i = 0; i < 500; i++) {
+        displayGameStatus(); // display updated game status
+    }
+}
+
+void flashLEDs(int times, int delay) {
+    for (int i = 0; i < times; i++) {
+        enableAllLeds();
+        lightUpAllLeds();
+        _delay_ms(delay);
+        lightDownAllLeds();
+        _delay_ms(delay);
+    }
+}
+
+void decrementOpponentScore(int* score) {
+    // initial display update
+    for (int j = 0; j < 5000; j++) {
+        if (currentPlayer == 'P') {
+            writeNumberToSegment(0, currentTurnScore);
+            writeCharToSegment(1, 'C');
+            writeNumberToSegment(2, computerScore / 10);
+            writeNumberToSegment(3, computerScore % 10);
+        } else {
+            writeNumberToSegment(0, currentTurnScore);
+            writeCharToSegment(1, 'P');
+            writeNumberToSegment(2, playerScore / 10);
+            writeNumberToSegment(3, playerScore % 10);
+        }
+    }
+    // decrement loop
+    for (int i = 1; i < currentTurnScore + 1; i++) {
+        if (*score < 0) *score = 0;
+        (*score)--;
+
+        // display update after decrement
+        for (int j = 0; j < 5000; j++) {
+            if (currentPlayer == 'P') {
+                writeNumberToSegment(0, currentTurnScore - i);
+                writeCharToSegment(1, 'C');
+                writeNumberToSegment(2, computerScore / 10);
+                writeNumberToSegment(3, computerScore % 10);
+            } else {
+                writeNumberToSegment(0, currentTurnScore - i);
+                writeCharToSegment(1, 'P');
+                writeNumberToSegment(2, playerScore / 10);
+                writeNumberToSegment(3, playerScore % 10);
+            }
+        }
+        // flash LEDs on
+        flashLEDs(1, 187.5);
+    }
+}
+
+void logGameTurn(char decision) {
+    if (currentTurnIndex >= turnsCapacity) {
+        // resize the gameTurns array if needed
+        turnsCapacity = (turnsCapacity == 0) ? INITIAL_TURNS_CAPACITY : turnsCapacity * 2;
+        gameTurns = realloc(gameTurns, turnsCapacity * sizeof(GameTurn));
+        if (!gameTurns) {
+            // handle allocation failure
+            writeStringAndWait("MEMERR", 1000);
+            while (1); // stop the game
+        }
+    }
+    gameTurns[currentTurnIndex].player = currentPlayer;
+    gameTurns[currentTurnIndex].turnScore = currentTurnScore;
+    gameTurns[currentTurnIndex].playerScore = playerScore;
+    gameTurns[currentTurnIndex].computerScore = computerScore;
+    gameTurns[currentTurnIndex].decision = decision;
+    currentTurnIndex++;
+}
+
+//******************************************************************************************************************************
+
+
+
+//******************************************************************************************************************************
+//                                              INITIALIZATION METHODS
+
+void PotentioValue(){ //read the value from the potentiometer
     OCR2A = 249;
-    TCCR2A |= _BV(WGM01); //enable CTC mode
-    TIMSK2 |= _BV(OCIE2A); //enable OCRA(interrupt)
-}
 
-void startTimer() {
-    TCCR2B |= _BV(CS22) | _BV(CS21); //set factor as 256  
-}
-
-ISR(TIMER2_COMPA_vect)
-{
-  counter++;
-  if ((counter + 1) % MULTIPLE == 0)
-  {
-    tick();
-    seconds += 1;
-    if (seconds % 1 == 0)
-    {
-      recalculate_newSituation(&currentSpeed, &gravity, &burst, &distance, &fuelReserve, lunar_lander);
-      printf("&currentSpeed %d, &gravity %d, &burst %d, &distance %d, &fuelReserve %d, lunar_lander %d\n",
-                                &currentSpeed, &gravity, &burst, &distance, &fuelReserve, lunar_lander);
-      lunar_lander->length += 1;
-    }
-  }
-}
-
-ISR(PCINT1_vect)
-{
-  if (bit_is_clear(PINC , PC2))
-  {
-    burst_duration += 1;
-  }
-}
-
-void initADC(){
-        PCICR |= _BV(PCIE1);  /* in Pin Change Interrupt Control Register: indicate
+    PCICR |= _BV(PCIE1);  /* in Pin Change Interrupt Control Register: indicate
                              * which interrupt(s) you want to activate (PCIE0: port B,
                              * PCIE1: port C, PCIE2: port D) */
 
-        PCMSK1 |= _BV(PC2);   /* In the corresponding Pin Change Mask Register: indicate
+    PCMSK1 |= _BV(PC1);   /* In the corresponding Pin Change Mask Register: indicate
                              * which pin(s) of that port activate the ISR. */
+
+    startTimer(); //start the timer 
+
+    while (seconds < 30) { // Wait for 30 seconds or button press to exit the loop
+        uint16_t potentio = readPotentio();//read value from potentio
+        writeNumber(potentio); //write the value of the potentio in the display
+
+        if (buttonIsPressed) {//check if button is pressed
+            break;
+        }
+    }
+    stopTimer();//we stop the timer
 }
 
-int main()
-{
-  initADC();
-  initUSART();
-  initTimer();
-  initButton();
-  initDisplay();
-  enableBTNinterrupt();
-  lunar_lander = malloc(sizeof(LUNDER_LANDER));
-  lunar_lander->burst = malloc(sizeof(int));
-  lunar_lander->distance = malloc(sizeof(int));
-  lunar_lander->fuelReserve = malloc(sizeof(int));
-  lunar_lander->distance = malloc(sizeof(int));
+ISR(TIMER2_COMPA_vect) {//interrupt for every time we reach the timer reaches the value of OCR==249(and not overflow)
+    count++;//count everytime this interrupt
+    if(((count+1)%MULTIPLE)==0){// ff the counter + 1 is divisible by MULTIPLE, then count 1 sec
+        seconds++;
+        printf("seconds left = %d\n", 30-seconds); //printf the seconds left before we exit the loop
+    } 
+}
 
-  lunar_lander->length = 0;
-  burst_duration = 0;
-  sei();
-  loop=1;
-  while (loop)
-  {
-    startTimer();
-    showParameters(&currentSpeed, &fuelReserve, &distance);
-  }
-  cli();
-  free(lunar_lander->burst);
-  free(lunar_lander->current_speed);
-  free(lunar_lander->fuelReserve);
-  free(lunar_lander->distance);
-  return 0;
+ISR(PCINT1_vect) {//interrupt for when button 1 is pressed
+    // button 1 is pressed (bit is set to 0)?
+    if (bit_is_clear(PINC, PC1)) { //check if button1 is pressed with bit is clear(so equals 0)
+        //we wait 250 microseconds and check again (debounce!)
+        _delay_us(250);
+  
+        if (bit_is_clear(PINC, PC1)) {//check again
+            buttonIsPressed = 1; //if same value then we set the boolean buttonIsPressed as true
+        }
+    }
+}
+//******************************************************************************************************************************
+
+
+
+
+//******************************************************************************************************************************
+//                                                    MAIN
+//******************************************************************************************************************************
+
+int main() {
+    enableAllLeds(); //enable all the leds
+    lightDownAllLeds(); //light down all the leds
+    initUSART();    //initialize the USART
+    initDisplay();  //initialize the display
+    enableAllButtons(); //enable all the buttons
+    enablePotentio(); //enable potentiometer
+    initTimer();    //initialize the timer
+
+    PotentioValue();// read the value from the potentiometer for 30 seconds and display it. if button 2 was pressed ==> exit the loop nad retrieve the value
+
+    srand(readPotentio()); // seed the random number generator with the value of the potentiometer
+
+    currentPlayer = (rand() % 2 == 0) ? 'P' : 'C'; // decide who starts randomly
+
+    for (int i = 0; i < 500; i++) {//display the game status at the beginning of the game
+        displayGameStatus();
+    }
+    while (1) { // main loop
+        if (currentPlayer == 'P') { //if player P then call
+            handlePlayerTurn();  //this
+        } else {                   //if player C then call
+            handleComputerTurn(); //this
+        }
+    }
+
+    return 0;
 }

@@ -4,7 +4,8 @@ void initTimer()
 {
     // enter your code
     // TCCR2A |= _BV(WGM21);| _BV(WGM20);
-    TCCR2A |= _BV(WGM22) | _BV(WGM20);
+    OCR2A = 249;
+    TCCR2A |= _BV(WGM01); //enable CTC mode
     TIMSK2 |= _BV(OCIE2A);
     sei();
 }
@@ -12,13 +13,13 @@ void initTimer()
 void startTimer()
 {
     // enter your code
-    TCCR2B |= _BV(CS22) | _BV(CS20);
+    TCCR2B |= _BV(CS22) | _BV(CS21);
 }
 
 void stopTimer()
 {
     // enter your code
-    TCCR2B &= ~(_BV(CS22) | _BV(CS20));
+    TCCR2B &= ~(_BV(CS22) | _BV(CS21));
 }
 
 void writeTimeAndWait(uint8_t minuten, uint8_t seconden, int delay)
