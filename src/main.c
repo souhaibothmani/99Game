@@ -15,11 +15,11 @@
 //******************************************************************************************************************************
 
 
-#define WIN_SCORE 99
-#define INITIAL_TURNS_CAPACITY 10
-#define MULTIPLE 250
+#define WIN_SCORE 99 //used to check if the player/computer won
+#define INITIAL_TURNS_CAPACITY 10 //used for array capacity 
+#define MULTIPLE 250//used to keep track of seconds
 
-typedef struct {
+typedef struct {//struc to keep track of each turn
     char player; // 'P' or 'C'
     int rolls[10]; // Store up to 10 rolls per turn
     int numRolls;
@@ -29,16 +29,16 @@ typedef struct {
     char decision; // 'A' for add, 'S' for subtract
 } GameTurn;
 
-GameTurn* gameTurns = NULL;
-int currentTurnIndex = 0;
+GameTurn* gameTurns = NULL; //array of turns
+int currentTurnIndex = 0; 
 int turnsCapacity = 0;
 
 int playerScore = 0; // player score
 int computerScore = 0; // computer score
 int currentTurnScore = 0; // current turn score
 char currentPlayer = 'P'; // 'P' for Player, 'C' for Computer
-int roll = 0;
-int count = 0;
+int roll = 0; //current roll value
+int count = 0; 
 int seconds = 0;
 int buttonIsPressed = 0;
 
@@ -159,7 +159,7 @@ void handlePlayerTurn() { //handle the player turn
                     break;
                 }
                 if (buttonPushed(3)) { //if player pressed button 3
-                    decrementOpponentScore(&computerScore);// subtract from opponent's score
+                    decrementOpponentScore(&computerScore);// subtract from opponent's score by passing the address of the variable
                     logGameTurn('S'); //save turn as S(substract)
                     switchTurn(); //switch turn
                     break;
@@ -223,6 +223,13 @@ void handleComputerTurn() { //handle computer turn
     }
 }
 
+//******************************************************************************************************************************
+
+
+
+
+//******************************************************************************************************************************
+//                                              SWITCH TURN METHODS
 void switchTurn() {
     currentTurnScore = 0; //set the current turnscore to 0
     roll = 0; //set the roll to 0
@@ -259,7 +266,7 @@ void flashLEDs(int times, int delay) {
     }
 }
 
-void decrementOpponentScore(int* score) {
+void decrementOpponentScore(int* score) {//declare a pointer
     // initial display update
     for (int j = 0; j < 5000; j++) {
         if (currentPlayer == 'P') {
@@ -276,8 +283,8 @@ void decrementOpponentScore(int* score) {
     }
     // decrement loop
     for (int i = 1; i < currentTurnScore + 1; i++) {
-        if (*score < 0) *score = 0;
-        (*score)--;
+        if (*score < 0) *score = 0; //if score is less than 0 then score =0;
+        (*score)--;//we gonna substract the value inside the box that the pointer points at
 
         // display update after decrement
         for (int j = 0; j < 5000; j++) {
@@ -302,7 +309,8 @@ void logGameTurn(char decision) {
     if (currentTurnIndex >= turnsCapacity) {
         // resize the gameTurns array if needed
         turnsCapacity = (turnsCapacity == 0) ? INITIAL_TURNS_CAPACITY : turnsCapacity * 2;
-        gameTurns = realloc(gameTurns, turnsCapacity * sizeof(GameTurn));
+        gameTurns = realloc(gameTurns, turnsCapacity * sizeof(GameTurn));//==> turnsCapacity times the GameTurn(so each turn)==>
+                                                                        //so for example at the beginning we have 10(turnsCapacity)* the sizeof a gameTurn(so in total we will have the size of 10 GameTurns)
         if (!gameTurns) {
             // handle allocation failure
             writeStringAndWait("MEMERR", 1000);
@@ -316,7 +324,6 @@ void logGameTurn(char decision) {
     gameTurns[currentTurnIndex].decision = decision;
     currentTurnIndex++;
 }
-
 //******************************************************************************************************************************
 
 
@@ -325,8 +332,8 @@ void logGameTurn(char decision) {
 //                                              INITIALIZATION METHODS
 
 void PotentioValue(){ //read the value from the potentiometer
-    OCR2A = 249;
-
+    OCR2A = 249;//prescaler is set to 256==> counts every 16micro==> after how many counts do we have 4 mili seconds? 4ms/16us==>250 but
+                //because timer counts from 0 we have to set it as 249
     PCICR |= _BV(PCIE1);  /* in Pin Change Interrupt Control Register: indicate
                              * which interrupt(s) you want to activate (PCIE0: port B,
                              * PCIE1: port C, PCIE2: port D) */
@@ -349,7 +356,7 @@ void PotentioValue(){ //read the value from the potentiometer
 
 ISR(TIMER2_COMPA_vect) {//interrupt for every time we reach the timer reaches the value of OCR==249(and not overflow)
     count++;//count everytime this interrupt
-    if(((count+1)%MULTIPLE)==0){// ff the counter + 1 is divisible by MULTIPLE, then count 1 sec
+    if(((count+1)%MULTIPLE)==0){// if the counter + 1 is divisible by MULTIPLE, then count 1 sec(250 times 4ms==>1000ms==>1s)
         seconds++;
         printf("seconds left = %d\n", 30-seconds); //printf the seconds left before we exit the loop
     } 
